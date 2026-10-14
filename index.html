@@ -1,0 +1,2339 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>膝影骺现 · 膝关节MRI骨骺自动分割系统</title>
+    <script src="./ort-wasm/ort.min.js"></script>
+    <script src="./nifti-reader-min.js"></script>
+    <script src="./jszip.min.js"></script>
+    <style>
+        * {
+            margin: 0;
+            padding: 0;
+            box-sizing: border-box;
+        }
+
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', 'PingFang SC', 'Hiragino Sans GB', 'Microsoft YaHei', sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+        }
+
+        /* 页面切换 */
+        .page {
+            display: none;
+            animation: fadeIn 0.4s ease;
+        }
+
+        .page.active {
+            display: block;
+        }
+
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+
+        /* 头部 */
+        .header {
+            text-align: center;
+            color: white;
+            margin-bottom: 30px;
+        }
+
+        .header h1 {
+            font-size: 2.2rem;
+            font-weight: 700;
+            margin-bottom: 8px;
+            text-shadow: 0 2px 10px rgba(0,0,0,0.2);
+        }
+
+        .header p {
+            font-size: 1rem;
+            opacity: 0.9;
+        }
+
+        /* 卡片 */
+        .card {
+            background: white;
+            border-radius: 20px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            padding: 35px;
+            margin-bottom: 20px;
+        }
+
+        .section-title {
+            font-size: 1.3rem;
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 20px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .section-title::before {
+            content: '';
+            width: 4px;
+            height: 24px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            border-radius: 2px;
+        }
+
+        /* 按钮 */
+        .btn {
+            padding: 12px 30px;
+            border: none;
+            border-radius: 10px;
+            font-size: 1rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+        }
+
+        .btn-primary {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .btn-primary:hover:not(:disabled) {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 20px rgba(102, 126, 234, 0.4);
+        }
+
+        .btn-primary:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+        }
+
+        .btn-secondary {
+            background: #f5f5f5;
+            color: #666;
+        }
+
+        .btn-secondary:hover {
+            background: #e0e0e0;
+        }
+
+        .btn-outline {
+            background: white;
+            color: #667eea;
+            border: 2px solid #667eea;
+        }
+
+        .btn-outline:hover {
+            background: #f0f4ff;
+        }
+
+        .button-row {
+            display: flex;
+            gap: 15px;
+            justify-content: center;
+            margin-top: 25px;
+        }
+
+        /* 首页 - 介绍区块 */
+        .epi-intro {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+            border-radius: 12px;
+            padding: 25px;
+            margin-bottom: 25px;
+        }
+
+        .epi-intro h3 {
+            color: #333;
+            margin-bottom: 15px;
+            font-size: 1.1rem;
+        }
+
+        .epi-intro p {
+            color: #555;
+            line-height: 1.8;
+            margin-bottom: 12px;
+        }
+
+        .grade-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            background: white;
+            border-radius: 8px;
+            overflow: hidden;
+        }
+
+        .grade-table th, .grade-table td {
+            padding: 12px 15px;
+            text-align: left;
+            border-bottom: 1px solid #eee;
+        }
+
+        .grade-table th {
+            background: #667eea;
+            color: white;
+            font-weight: 600;
+        }
+
+        .grade-table tr:last-child td {
+            border-bottom: none;
+        }
+
+        .grade-table tr:hover {
+            background: #f8f9ff;
+        }
+
+        /* 宽表：分割精度（分组表头） */
+        .seg-acc-table { font-size: .92rem; }
+        .seg-acc-table th, .seg-acc-table td { padding: 10px 8px; text-align: center; }
+        .seg-acc-table td:first-child, .seg-acc-table th[rowspan="2"] { text-align: center; font-weight: 600; }
+        .seg-acc-table thead tr:first-child th { background: #5a73d8; }
+        .seg-acc-table thead tr:nth-child(2) th { background: #7e92ee; }
+
+        .grade-badge {
+            display: inline-block;
+            width: 28px;
+            height: 28px;
+            line-height: 28px;
+            text-align: center;
+            border-radius: 50%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            font-weight: 600;
+            font-size: 0.85rem;
+        }
+
+        /* 首页 - 精度表 */
+        .stage-table th, .stage-table td {
+            vertical-align: top;
+            text-align: left;
+            font-size: 0.84rem;
+            line-height: 1.62;
+            word-break: keep-all;
+            overflow-wrap: break-word;
+            padding: 10px 12px;
+        }
+        .stage-table th { text-align: center; white-space: nowrap; padding: 10px 8px; }
+        .stage-table td.stage-cell {
+            text-align: center;
+            vertical-align: middle;
+            width: 46px;
+            white-space: nowrap;
+        }
+        .stage-table td.interp-cell { font-weight: 600; color: #4a3f9a; }
+        .stage-table .col-t1 { width: 33.5%; }
+        .stage-table .col-fs { width: 33.5%; }
+        .stage-table .col-ip { width: calc(100% - 46px - 67%); }
+
+        /* 分割方式选择 */
+        .segmentation-choice {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 20px;
+            margin-top: 20px;
+        }
+
+        .choice-card {
+            border: 2px solid #e8e8e8;
+            border-radius: 16px;
+            padding: 30px;
+            cursor: pointer;
+            transition: all 0.3s;
+            text-align: center;
+            background: #fafafa;
+        }
+
+        .choice-card:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+            transform: translateY(-3px);
+            box-shadow: 0 12px 30px rgba(102, 126, 234, 0.2);
+        }
+
+        .choice-icon {
+            font-size: 3.5rem;
+            margin-bottom: 15px;
+        }
+
+        .choice-card h3 {
+            font-size: 1.2rem;
+            color: #333;
+            margin-bottom: 10px;
+        }
+
+        .choice-card p {
+            color: #666;
+            font-size: 0.9rem;
+            line-height: 1.6;
+        }
+
+        /* 模型选择 */
+        .model-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+            gap: 14px;
+            margin-bottom: 25px;
+        }
+
+        .model-card {
+            border: 2px solid #e8e8e8;
+            border-radius: 12px;
+            padding: 18px;
+            cursor: pointer;
+            transition: all 0.3s;
+            background: #fafafa;
+        }
+
+        .model-card:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .model-card.selected {
+            border-color: #667eea;
+            background: linear-gradient(135deg, #f0f4ff 0%, #f5f0ff 100%);
+            box-shadow: 0 4px 15px rgba(102, 126, 234, 0.3);
+        }
+
+        .model-card h4 {
+            font-size: 1rem;
+            color: #333;
+            margin-bottom: 6px;
+        }
+
+        .model-type {
+            display: inline-block;
+            padding: 3px 10px;
+            border-radius: 20px;
+            font-size: 0.72rem;
+            font-weight: 500;
+            margin-bottom: 8px;
+        }
+
+        .model-type.dual { background: #e8f5e9; color: #2e7d32; }
+        .model-type.single-pd { background: #fff3e0; color: #e65100; }
+        .model-type.single-t1 { background: #e3f2fd; color: #1565c0; }
+
+        .model-card p {
+            font-size: 0.8rem;
+            color: #666;
+            line-height: 1.5;
+        }
+.seg-dice {
+            margin-top: 8px; padding: 6px 9px; font-size: 0.72rem; line-height: 1.5;
+            color: #4a3f9a; background: #eef1ff; border: 1px solid #d9deff;
+            border-radius: 8px; pointer-events: none; text-align: left;
+        }
+        .auto-seg-notice {
+            margin: 6px 0 14px; padding: 9px 13px; font-size: 0.82rem; line-height: 1.55;
+            color: #8a5a00; background: #fff7e6; border: 1px solid #ffe0a3; border-radius: 10px;
+        }
+        .card-metrics { list-style: none; padding: 0; margin: 8px 0 4px; display: grid; gap: 5px; }
+        .card-metrics li { display: flex; justify-content: space-between; align-items: baseline; gap: 8px; font-size: 0.8rem; line-height: 1.35; }
+        .card-metrics .cm-label { color: #777; }
+        .card-metrics .cm-val { font-weight: 700; color: #4a3f9a; white-space: nowrap; }
+
+        .model-size {
+            font-size: 0.72rem;
+            color: #999;
+            margin-top: 6px;
+        }
+
+        /* 参数设置 */
+        .params-row {
+            display: flex;
+            gap: 20px;
+            margin-bottom: 25px;
+            flex-wrap: wrap;
+        }
+
+        .param-group {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+
+        .param-group label {
+            font-weight: 500;
+            color: #555;
+        }
+
+        .param-group select {
+            padding: 8px 16px;
+            border: 2px solid #e0e0e0;
+            border-radius: 8px;
+            font-size: 0.95rem;
+            background: white;
+            cursor: pointer;
+        }
+
+        .param-group select:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+
+        /* 上传区域 */
+        .upload-container {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+            gap: 18px;
+            margin-bottom: 25px;
+        }
+
+        .upload-box {
+            border: 2px dashed #ccc;
+            border-radius: 12px;
+            padding: 25px;
+            text-align: center;
+            transition: all 0.3s;
+            cursor: pointer;
+            background: #fafafa;
+        }
+
+        .upload-box:hover {
+            border-color: #667eea;
+            background: #f0f4ff;
+        }
+
+        .upload-box.has-image {
+            border-style: solid;
+            border-color: #667eea;
+            padding: 12px;
+        }
+
+        /* 批量处理 */
+        .batch-toolbar { display:flex; justify-content:space-between; align-items:center; gap:10px;
+            margin-bottom:12px; padding-bottom:10px; border-bottom:1px solid #eee; }
+        .batch-progress { font-size:.88rem; color:#667eea; font-weight:600; }
+        .batch-list { display:flex; flex-direction:column; gap:14px; }
+        .batch-card { border:1px solid #e6e9f5; border-radius:10px; padding:12px; background:#fff; text-align:left; }
+        .batch-card .batch-head { display:flex; justify-content:space-between; align-items:center; gap:8px;
+            margin-bottom:6px; font-size:.85rem; font-weight:600; color:#333; }
+        .batch-card .batch-head span { word-break:break-all; }
+        .batch-card .batch-status { font-size:.82rem; color:#888; }
+        .batch-card .batch-status.done { color:#2e9e5b; }
+        .batch-card .batch-status.failed { color:#d0504b; }
+        .batch-card .batch-imgs { display:flex; gap:10px; justify-content:center; margin:8px 0; flex-wrap:wrap; }
+        .batch-card .batch-imgs img { width:190px; border:1px solid #eee; border-radius:6px; }
+        .batch-card .batch-dl { display:flex; gap:8px; justify-content:center; flex-wrap:wrap; }
+        .batch-card .batch-dl button { font-size:.82rem; padding:6px 12px; }
+
+        .upload-icon {
+            font-size: 2.5rem;
+            color: #ccc;
+            margin-bottom: 8px;
+        }
+
+        .upload-box p {
+            color: #666;
+            margin-bottom: 4px;
+            font-size: 0.9rem;
+        }
+
+        .upload-hint {
+            font-size: 0.78rem;
+            color: #999;
+        }
+
+        .preview-container {
+            position: relative;
+        }
+
+        .preview-image {
+            max-width: 100%;
+            max-height: 220px;
+            border-radius: 8px;
+            object-fit: contain;
+        }
+
+        .preview-label {
+            position: absolute;
+            top: 8px;
+            left: 8px;
+            background: rgba(102, 126, 234, 0.9);
+            color: white;
+            padding: 4px 10px;
+            border-radius: 6px;
+            font-size: 0.75rem;
+            font-weight: 500;
+        }
+
+        .auto-segment-status {
+            margin-top: 10px;
+            padding: 8px;
+            border-radius: 6px;
+            font-size: 0.8rem;
+        }
+
+        .auto-segment-status.pending { background: #fff3e0; color: #e65100; }
+        .auto-segment-status.processing { background: #e3f2fd; color: #1565c0; }
+        .auto-segment-status.done { background: #e8f5e9; color: #2e7d32; }
+
+        /* 结果 */
+        .result-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+            gap: 18px;
+            margin-bottom: 25px;
+        }
+
+        .result-card {
+            background: linear-gradient(135deg, #f5f7fa 0%, #e4e8ec 100%);
+            border-radius: 12px;
+            padding: 22px;
+            text-align: center;
+        }
+
+        .result-card.age-card {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+        }
+
+        .result-label {
+            font-size: 0.85rem;
+            opacity: 0.8;
+            margin-bottom: 6px;
+        }
+
+        .result-value {
+            font-size: 2.2rem;
+            font-weight: 700;
+        }
+
+        .result-unit {
+            font-size: 0.9rem;
+            opacity: 0.7;
+        }
+
+        .threshold-section {
+            background: #f8f9fa;
+            border-radius: 12px;
+            padding: 20px;
+        }
+
+        .threshold-title {
+            font-weight: 600;
+            color: #333;
+            margin-bottom: 12px;
+        }
+
+        .threshold-item {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 0;
+            border-bottom: 1px solid #eee;
+        }
+
+        .threshold-item:last-child { border-bottom: none; }
+
+        .threshold-badge {
+            padding: 4px 12px;
+            border-radius: 20px;
+            font-size: 0.78rem;
+            font-weight: 500;
+        }
+
+        .threshold-badge.pass { background: #e8f5e9; color: #2e7d32; }
+        .threshold-badge.idle { background: #f5f5f5; color: #999; }
+
+        .threshold-info {
+            flex: 1;
+            color: #555;
+            font-size: 0.9rem;
+        }
+
+        /* 提示和加载 */
+        .info-note {
+            background: #e3f2fd;
+            border-left: 4px solid #2196f3;
+            padding: 12px 18px;
+            border-radius: 0 8px 8px 0;
+            margin-bottom: 20px;
+            font-size: 0.88rem;
+            color: #1565c0;
+            line-height: 1.6;
+        }
+
+        .validation-message {
+            padding: 12px 18px;
+            border-radius: 8px;
+            margin-bottom: 20px;
+            display: none;
+            font-size: 0.9rem;
+        }
+
+        .validation-message.show { display: block; }
+        .validation-message.error { background: #ffebee; color: #c62828; border: 1px solid #ffcdd2; }
+        .validation-message.warning { background: #fff3e0; color: #e65100; border: 1px solid #ffe0b2; }
+        .validation-message.success { background: #e8f5e9; color: #2e7d32; border: 1px solid #c8e6c9; }
+
+        .loading-overlay {
+            display: none;
+            position: fixed;
+            top: 0; left: 0; right: 0; bottom: 0;
+            background: rgba(0,0,0,0.5);
+            z-index: 1000;
+            justify-content: center;
+            align-items: center;
+        }
+
+        .loading-overlay.show { display: flex; }
+
+        .loading-box {
+            background: white;
+            padding: 30px 50px;
+            border-radius: 12px;
+            text-align: center;
+        }
+
+        .spinner {
+            width: 40px;
+            height: 40px;
+            border: 4px solid #f3f3f3;
+            border-top: 4px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin: 0 auto 15px;
+        }
+
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+
+        .progress-bar {
+            width: 200px;
+            height: 6px;
+            background: #eee;
+            border-radius: 3px;
+            margin-top: 10px;
+            overflow: hidden;
+        }
+
+        .progress-fill {
+            height: 100%;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            width: 0%;
+            transition: width 0.3s;
+        }
+
+        /* 面包屑导航 */
+        .breadcrumb {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            margin-bottom: 20px;
+            color: rgba(255,255,255,0.8);
+            font-size: 0.9rem;
+        }
+
+        .breadcrumb-item {
+            cursor: pointer;
+        }
+
+        .breadcrumb-item:hover {
+            color: white;
+            text-decoration: underline;
+        }
+
+        .breadcrumb-item.current {
+            color: white;
+            font-weight: 500;
+            cursor: default;
+        }
+
+        .breadcrumb-item.current:hover {
+            text-decoration: none;
+        }
+
+        .breadcrumb-sep {
+            opacity: 0.5;
+        }
+
+        /* 分割预览 */
+        .segment-preview {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 15px;
+            margin-top: 15px;
+        }
+
+        .segment-preview-item {
+            text-align: center;
+        }
+
+        .segment-preview-item img {
+            max-width: 100%;
+            max-height: 200px;
+            border-radius: 8px;
+            border: 1px solid #eee;
+        }
+
+        .segment-preview-label {
+            font-size: 0.8rem;
+            color: #666;
+            margin-top: 5px;
+        }
+
+        /* 语言切换 */
+        .lang-switch {
+            position: absolute;
+            top: 20px;
+            right: 20px;
+            background: rgba(255,255,255,0.2);
+            color: white;
+            border: 1px solid rgba(255,255,255,0.4);
+            border-radius: 20px;
+            padding: 6px 16px;
+            font-size: 0.85rem;
+            font-weight: 600;
+            cursor: pointer;
+            transition: all 0.3s;
+            backdrop-filter: blur(5px);
+            z-index: 100;
+        }
+        .lang-switch:hover {
+            background: rgba(255,255,255,0.35);
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <button class="lang-switch" id="langSwitch" onclick="toggleLanguage()">EN</button>
+        <!-- 面包屑 -->
+        <div class="breadcrumb" id="breadcrumb"></div>
+
+        <div class="header">
+            <h1 data-i18n="app_title">🦴 膝影骺现</h1>
+            <p data-i18n="app_subtitle">基于U-Net深度学习的膝关节MRI自动分割系统</p>
+        </div>
+
+        <!-- ========== 第1页：首页介绍 & 分割方式选择 ========== -->
+        <div class="page active" id="page-home">
+            <div class="card">
+                                <div class="section-title" data-i18n="seg_home_title">系统介绍</div>
+                <p style="color:#555;line-height:1.8;font-size:.95rem;margin-bottom:16px;" data-i18n="seg_home_desc">膝影骺现系统用于膝关节MRI中股骨远端、胫骨近端骨骺区域的自动分割。上传T1或PD序列原始图像后，系统基于U-Net深度学习模型输出三类标签（0 背景、1 股骨、2 胫骨），并提供原图叠加预览与掩码文件下载（NIfTI/PNG）。推荐使用NIfTI格式（.nii/.nii.gz）。</p>
+                <p style="background:#f0f5ff;border:1px solid #d6e2ff;border-radius:8px;padding:8px 12px;color:#3f5591;font-size:.92rem;margin-bottom:16px;" data-i18n="seg_batch_note">📦 支持批量处理：单序列内可批量上传，单次最多处理 10 张图像，全部结果可打包为 ZIP 下载。</p>
+
+                <div class="section-title" data-i18n="seg_value_title">骨骺区域与分割掩码的意义</div>
+                <p style="color:#555;line-height:1.8;font-size:.95rem;margin-bottom:16px;" data-i18n="seg_value_items">① 骨骺区域的意义：股骨远端、胫骨近端的骨骺（生长板）区域，是骨骼发育成熟评估的解剖依据——骨骺骨化、生长板由部分融合到完全闭合的过程，承载着与年龄相关的关键信息。② 分割掩码的用途：分割后的掩码可作为结构化标注用于模型训练、统计建模及教学演示，也可用于区域面积、骨骺宽度、形态与信号强度等定量分析。③ 自动分割将逐例人工勾画变为一键完成，让批量数据标注简单高效。</p>
+
+                <div class="section-title" data-i18n="seg_dice_table_title">模型分割精度（独立测试集）</div>
+                <table class="grade-table seg-acc-table" style="margin-bottom:8px;">
+                    <thead>
+                        <tr>
+                            <th rowspan="2" data-i18n="seg_col_seq">序列</th>
+                            <th colspan="3" data-i18n="seg_col_grp_dice">Dice</th>
+                            <th colspan="2" data-i18n="seg_col_grp_iou">IoU</th>
+                            <th colspan="2" data-i18n="seg_col_grp_hd">HD95 (mm)</th>
+                        </tr>
+                        <tr>
+                            <th data-i18n="seg_col_short_femur">股骨</th><th data-i18n="seg_col_short_tibia">胫骨</th><th data-i18n="seg_col_short_mean">平均</th>
+                            <th data-i18n="seg_col_short_femur">股骨</th><th data-i18n="seg_col_short_tibia">胫骨</th>
+                            <th data-i18n="seg_col_short_femur">股骨</th><th data-i18n="seg_col_short_tibia">胫骨</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>T1</td><td>0.9519</td><td>0.9228</td><td>0.9373</td><td>0.9099</td><td>0.8622</td><td>4.3552</td><td>4.3082</td></tr>
+                        <tr><td>PD</td><td>0.9195</td><td>0.8697</td><td>0.8946</td><td>0.8581</td><td>0.7792</td><td>11.7960</td><td>21.4895</td></tr>
+                    </tbody>
+                </table>
+                <p style="color:#888;font-size:.85rem;margin-bottom:16px;" data-i18n="seg_dice_note">Dice与IoU（交并比）取值0–1，越接近1表示分割结果与人工标注越一致；HD95（95%豪斯多夫距离，单位mm）衡量分割边界误差，数值越小越好。</p>
+
+                <div class="section-title" data-i18n="seg_workflow_title">使用流程</div>
+                <p style="color:#555;line-height:1.8;font-size:.95rem;margin-bottom:10px;" data-i18n="seg_workflow_desc">上传原始影像后即可查看分割叠加效果，并下载分割掩码直接使用，或对不满意的掩码进行修改。</p>
+                <img id="workflowImg" src="assets/workflow_zh.png" alt="workflow" style="width:100%;border-radius:12px;margin-bottom:18px;display:block;">
+
+                <div class="section-title" data-i18n="seg_io_title">输出内容</div>
+                <p style="color:#555;line-height:1.8;font-size:.95rem;margin-bottom:16px;" data-i18n="seg_io_items">① 掩码叠加预览（红色=股骨，绿色=胫骨）；② 叠加图PNG；③ 分割掩码NIfTI（.nii，可在ITK-SNAP中打开核对、修改）；④ 批量结果可打包为ZIP下载。</p>
+
+                <div class="segmentation-choice" style="grid-template-columns:minmax(0,680px);justify-content:center;">
+                    <div class="choice-card" onclick="selectSegmentation()" style="flex:0 0 auto;width:680px;max-width:100%;">
+                        <div class="choice-icon">🧩</div>
+                        <h3 data-i18n="seg_start_btn">开始分割</h3>
+                        <p data-i18n="seg_start_desc">上传T1或PD膝关节MRI，自动分割股骨与胫骨骨骺区域</p>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- ========== 第2页：图像上传 ========== -->
+        <div class="page" id="page-upload">
+            <div class="card">
+                                <div class="validation-message" id="validationMsg"></div>
+
+                <div class="section-title" id="uploadTitle" data-i18n="upload_title_auto">上传原始图像（深度学习自动分割模式）</div>
+                <div class="upload-container" id="uploadContainer"></div>
+                <p style="color:#888;font-size:.85rem;margin:8px 0 14px;" data-i18n="seg_upload_hint">T1或PD任一序列图像上传后即自动分割；如需双序列结果，请分别上传。每个序列下方都会显示掩码预览与下载按钮。</p>
+                <div class="button-row">
+                    <button class="btn btn-secondary" onclick="goBack()"><span data-i18n="btn_back">← 返回</span></button>
+                    <button class="btn btn-secondary" onclick="restart()"><span data-i18n="seg_new_seg">重新分割</span></button>
+                </div>
+            </div>
+        </div>
+
+    </div>
+
+    <!-- 加载遮罩 -->
+    <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-box">
+            <div class="spinner"></div>
+            <div id="loadingText" data-i18n="loading_default">处理中...</div>
+            <div class="progress-bar" id="progressBar" style="display:none;">
+                <div class="progress-fill" id="progressFill"></div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        // ==================== 模型配置 ====================
+        // ---- 大模型远程托管配置 ----
+        // 背景：GitHub 仓库单文件硬上限 100MB，且 GitHub Pages 不支持 LFS、Release 附件又不带跨域头(CORS)，
+        //      因此超过 100MB 的 3 个模型不放进仓库，改从支持跨域的托管站（已实测 Hugging Face 可用）加载。
+        // 使用：把这 3 个 onnx 上传到你的 Hugging Face 模型仓库后，将 base 改成你的地址（末尾保留斜杠 /）。
+        //      若保持占位符“你的用户名”不变，则自动回退到本地 ./models/ 路径，便于本机离线使用。
+        const REMOTE_MODELS = {
+            base: 'https://huggingface.co/你的用户名/knee-mri-models/resolve/main/',
+            files: ['model_pd_t1_cnn.onnx', 'model_pd_cnn.onnx', 'model_t1_cnn.onnx']
+        };
+        function resolveModelPath(file) {
+            if (REMOTE_MODELS.base && REMOTE_MODELS.base.indexOf('你的用户名') === -1 &&
+                REMOTE_MODELS.files.indexOf(file) >= 0) {
+                return REMOTE_MODELS.base + file;
+            }
+            return './models/' + file; // 本地回退
+        }
+
+        const MODEL_CONFIGS = {
+            'pd_t1_resnet': {
+                path: './models/model_pd_t1_resnet.onnx',
+                type: 'dual', inputSize: 256,
+                inputs: ['t1_input', 'pd_input', 'gender_input'],
+                outputs: ['femur_out', 'tibia_out', 'age_out']
+            },
+            'pd_t1_cnn': {
+                path: resolveModelPath('model_pd_t1_cnn.onnx'),
+                type: 'dual', inputSize: 224,
+                inputs: ['t1_input', 'pd_input', 'gender_input'],
+                outputs: ['femur_out', 'tibia_out', 'age_out']
+            },
+            'pd_resnet': {
+                path: './models/model_pd_resnet.onnx',
+                type: 'single', modality: 'pd', inputSize: 256,
+                inputs: ['image_input', 'gender_input'],
+                outputs: ['femur_out', 'tibia_out', 'age_out']
+            },
+            't1_resnet': {
+                path: './models/model_t1_resnet.onnx',
+                type: 'single', modality: 't1', inputSize: 256,
+                inputs: ['image_input', 'gender_input'],
+                outputs: ['femur_out', 'tibia_out', 'age_out']
+            },
+            'pd_cnn': {
+                path: resolveModelPath('model_pd_cnn.onnx'),
+                type: 'single', modality: 'pd', inputSize: 224,
+                inputs: ['image_input', 'gender_input'],
+                outputs: ['femur_out', 'tibia_out', 'age_out']
+            },
+            't1_cnn': {
+                path: resolveModelPath('model_t1_cnn.onnx'),
+                type: 'single', modality: 't1', inputSize: 224,
+                inputs: ['image_input', 'gender_input'],
+                outputs: ['femur_out', 'tibia_out', 'age_out']
+            }
+        };
+
+        const UNET_CONFIGS = {
+            'pd': './unet_models/knee_pd_unet.onnx',
+            't1': './unet_models/knee_t1_unet.onnx'
+        };
+
+        // ==================== 国际化 (i18n) ====================
+        const I18N = {
+            zh: {
+                // 页面标题
+                page_title: '膝影骺现 · 膝关节MRI骨骺自动分割系统',
+                app_title: '🦴 膝影骺现',
+                app_subtitle: '基于U-Net深度学习的膝关节MRI自动分割系统',
+                // 面包屑
+                bc_home: '首页', bc_upload: '上传图像',
+                seg_home_title: '系统介绍',
+                seg_home_desc: '膝影骺现系统用于膝关节MRI中股骨远端、胫骨近端骨骺区域的自动分割。上传T1或PD序列原始图像后，系统基于U-Net深度学习模型输出三类标签（0 背景、1 股骨、2 胫骨），并提供原图叠加预览与掩码文件下载（NIfTI/PNG）。推荐使用NIfTI格式（.nii/.nii.gz）。',
+                seg_batch_note: '📦 支持批量处理：单序列内可批量上传，单次最多处理 10 张图像，全部结果可打包为 ZIP 下载。',
+                seg_value_title: '骨骺区域与分割掩码的意义',
+                seg_value_items: '① 骨骺区域的意义：股骨远端、胫骨近端的骨骺（生长板）区域，是骨骼发育成熟评估的解剖依据——骨骺骨化、生长板由部分融合到完全闭合的过程，承载着与年龄相关的关键信息。② 分割掩码的用途：分割后的掩码可作为结构化标注用于模型训练、统计建模及教学演示，也可用于区域面积、骨骺宽度、形态与信号强度等定量分析。③ 自动分割将逐例人工勾画变为一键完成，让批量数据标注简单高效。',
+                seg_dice_table_title: '模型分割精度（独立测试集）',
+                seg_col_seq: '序列',
+                seg_col_grp_dice: 'Dice', seg_col_grp_iou: 'IoU', seg_col_grp_hd: 'HD95 (mm)',
+                seg_col_short_femur: '股骨', seg_col_short_tibia: '胫骨', seg_col_short_mean: '平均',
+                seg_dice_note: 'Dice与IoU（交并比）取值0–1，越接近1表示分割结果与人工标注越一致；HD95（95%豪斯多夫距离，单位mm）衡量分割边界误差，数值越小越好。',
+                seg_workflow_title: '使用流程',
+                seg_workflow_desc: '上传原始影像后即可查看分割叠加效果，并下载分割掩码直接使用，或对不满意的掩码进行修改。',
+                seg_io_title: '输出内容',
+                seg_io_items: '① 掩码叠加预览（红色=股骨，绿色=胫骨）；② 叠加图PNG；③ 分割掩码NIfTI（.nii，可在ITK-SNAP中打开核对、修改）；④ 批量结果可打包为ZIP下载。',
+                seg_start_btn: '开始分割', seg_start_desc: '上传T1或PD膝关节MRI，自动分割股骨与胫骨骨骺区域',
+                seg_upload_hint: 'T1或PD任一序列图像上传后即自动分割；如需双序列结果，请分别上传。每个序列下方都会显示掩码预览与下载按钮。',
+                seg_new_seg: '重新分割',
+                seg_dl_png_overlay: '下载叠加图 PNG（红=股骨，绿=胫骨）',
+                // 批量
+                batch_add: '添加更多',
+                batch_zip: '打包下载（ZIP）',
+                batch_progress: '已完成 {done}/{total}',
+                batch_reading: '🔄 正在读取图像…',
+                batch_seg_running: '🔄 正在自动分割…',
+                batch_seg_done: '✅ 分割完成',
+                batch_seg_failed: '❌ 分割失败：',
+                batch_zipping: '正在打包…',
+                batch_zip_empty: '暂无可下载的结果',
+                batch_zip_failed: '打包失败：',
+                batch_limit: '单个序列最多批量处理 {n} 个文件',
+                upload_title_auto: '上传原始图像（深度学习自动分割模式）',
+                btn_back: '← 返回',
+                // 上传区域
+                t1_raw: 'T1加权原始图像', pd_raw: 'PD加权原始图像',
+                upload_hint_t1: '点击上传 T1 加权 MRI（支持 NIfTI/PNG/JPG，推荐使用 NIfTI）',
+                upload_hint_pd: '点击上传 PD 加权 MRI（支持 NIfTI/PNG/JPG，推荐使用 NIfTI）',
+                label_mask: '🎯 ROI掩码', label_t1: 'T1加权', label_pd: 'PD加权', label_raw: '原始图像',
+                // 分割状态
+                seg_loading: '🔄 正在加载U-Net模型并自动分割...',
+                seg_done: '✅ 深度学习自动分割完成（红色=股骨，绿色=胫骨）',
+                seg_failed: '⚠️ 自动分割失败，请重新上传图像',
+                seg_download_mask: '💾 下载分割掩码 (.nii) 用于ITK-SNAP验证',
+                seg_preview_orig: '原始图像',
+                seg_preview_overlay: '分割叠加（<span style="color:red">■股骨</span> <span style="color:green">■胫骨</span>）',
+                // 加载/状态
+                loading_default: '处理中...',
+                loading_reading: '正在读取图像...',
+                loading_unet: '正在加载U-Net分割模型...',
+                loading_seg: '正在进行ROI自动分割...',
+                // 错误/提示
+                err_nifti_lib: 'NIfTI库未加载',
+                err_load_image: '图像加载失败: ',
+                confirm_home: '返回首页将清空当前上传的图像，确定继续吗？',
+            },
+            en: {
+                page_title: 'KneeEpiSeg · Knee MRI Epiphyseal Auto-Segmentation System',
+                app_title: '🦴 KneeEpiSeg',
+                app_subtitle: 'Automatic Knee MRI Segmentation System Based on U-Net Deep Learning',
+                bc_home: 'Home', bc_upload: 'Upload Images',
+                seg_home_title: 'Overview',
+                seg_home_desc: 'KneeEpiSeg automatically segments the distal femoral and proximal tibial epiphyseal regions in knee MRI. After uploading T1 or PD images, a U-Net deep-learning model outputs three labels (0 background, 1 femur, 2 tibia) and provides overlay previews and mask downloads (NIfTI/PNG). NIfTI format (.nii/.nii.gz) is recommended.',
+                seg_batch_note: '📦 Batch mode: batch upload within a single sequence is supported — up to 10 images can be processed at a time, and all results can be downloaded as a ZIP archive.',
+                seg_value_title: 'Epiphyseal Regions and the Value of Masks',
+                seg_value_items: '1) Why the epiphyseal regions matter: the epiphyses (growth plates) of the distal femur and proximal tibia are the anatomical basis of skeletal maturation assessment — epiphyseal ossification and the progression of growth-plate fusion from partial to complete carry the key age-related information. 2) What the masks are used for: the segmented masks can act as structured labels for model training, statistical modeling and teaching, and can also support quantitative analysis (region area, metaphyseal width, shape and signal intensity). 3) Auto segmentation turns per-case manual contouring into a one-click task, making batch annotation simple and efficient.',
+                seg_dice_table_title: 'Segmentation Accuracy (Independent Test Set)',
+                seg_col_seq: 'Sequence',
+                seg_col_grp_dice: 'Dice', seg_col_grp_iou: 'IoU', seg_col_grp_hd: 'HD95 (mm)',
+                seg_col_short_femur: 'Femur', seg_col_short_tibia: 'Tibia', seg_col_short_mean: 'Mean',
+                seg_dice_note: 'Dice and IoU (intersection over union) range from 0 to 1, with values closer to 1 indicating better agreement with manual annotation; HD95 (95th-percentile Hausdorff distance, in mm) measures boundary error, where smaller is better.',
+                seg_workflow_title: 'Workflow',
+                seg_workflow_desc: 'After uploading the original image, review the segmentation overlay, then download the mask to use directly or edit any unsatisfactory parts.',
+                seg_io_title: 'Outputs',
+                seg_io_items: '1) Mask overlay preview (red=femur, green=tibia); 2) Overlay PNG; 3) NIfTI mask (.nii, open in ITK-SNAP to review and edit); 4) batch results can be downloaded as a ZIP archive.',
+                seg_start_btn: 'Start Segmentation', seg_start_desc: 'Upload T1 or PD knee MRI to segment the femoral and tibial epiphyseal regions.',
+                seg_upload_hint: 'Each T1 or PD sequence is segmented automatically after upload; upload both for dual-sequence results. Mask previews and download buttons appear below each sequence.',
+                seg_new_seg: 'New Segmentation',
+                seg_dl_png_overlay: 'Download Overlay PNG (red=femur, green=tibia)',
+                // Batch
+                batch_add: 'Add more',
+                batch_zip: 'Download all (ZIP)',
+                batch_progress: 'Completed {done}/{total}',
+                batch_reading: 'Reading image…',
+                batch_seg_running: 'Running auto segmentation…',
+                batch_seg_done: 'Segmentation complete',
+                batch_seg_failed: 'Segmentation failed: ',
+                batch_zipping: 'Packing…',
+                batch_zip_empty: 'No results to download',
+                batch_zip_failed: 'Packing failed: ',
+                batch_limit: 'Up to {n} files per sequence',
+                upload_title_auto: 'Upload Original Images (Deep-Learning Auto Segmentation)',
+                btn_back: '← Back',
+                t1_raw: 'T1-weighted Original Image', pd_raw: 'PD-weighted Original Image',
+                upload_hint_t1: 'Click to upload T1-weighted MRI (NIfTI/PNG/JPG supported, NIfTI recommended)',
+                upload_hint_pd: 'Click to upload PD-weighted MRI (NIfTI/PNG/JPG supported, NIfTI recommended)',
+                label_mask: '🎯 ROI Mask', label_t1: 'T1-weighted', label_pd: 'PD-weighted', label_raw: 'Original Image',
+                seg_loading: '🔄 Loading U-Net model and performing auto-segmentation...',
+                seg_done: '✅ Deep-learning auto-segmentation complete (red=femur, green=tibia)',
+                seg_failed: '⚠️ Auto-segmentation failed. Please re-upload the image.',
+                seg_download_mask: '💾 Download Segmentation Mask (.nii) for ITK-SNAP Verification',
+                seg_preview_orig: 'Original Image',
+                seg_preview_overlay: 'Segmentation Overlay (<span style="color:red">■Femur</span> <span style="color:green">■Tibia</span>)',
+                loading_default: 'Processing...',
+                loading_reading: 'Reading image...',
+                loading_unet: 'Loading U-Net segmentation model...',
+                loading_seg: 'Performing automatic ROI segmentation...',
+                err_nifti_lib: 'NIfTI library not loaded',
+                err_load_image: 'Failed to load image: ',
+                confirm_home: 'Returning to the home page will clear all uploaded images. Continue?',
+            }
+        };
+
+        let currentLang = localStorage.getItem('lang') || 'zh';
+
+        function t(key, vars) {
+            let s = (I18N[currentLang] && (key in I18N[currentLang])) ? I18N[currentLang][key] : (I18N.zh[key] || key);
+            if (vars) {
+                for (const k in vars) s = s.replace('{' + k + '}', vars[k]);
+            }
+            return s;
+        }
+
+        function applyI18n() {
+            document.documentElement.lang = currentLang === 'zh' ? 'zh-CN' : 'en';
+            document.title = t('page_title');
+            // 工作流示意图按语言切换
+            const wf = document.getElementById('workflowImg');
+            if (wf) wf.src = 'assets/workflow_' + (currentLang === 'zh' ? 'zh' : 'en') + '.png';
+            document.querySelectorAll('[data-i18n]').forEach(el => {
+                el.textContent = t(el.getAttribute('data-i18n'));
+            });
+            // 语言按钮文字
+            const sw = document.getElementById('langSwitch');
+            if (sw) sw.textContent = currentLang === 'zh' ? 'EN' : '中文';
+            // 自动分割模式：设置上传标题
+            const title = document.getElementById('uploadTitle');
+            if (title) title.textContent = t('upload_title_auto');
+            // 刷新面包屑
+            if (typeof currentPage !== 'undefined') updateBreadcrumb(currentPage);
+            // 刷新上传区域（保留已上传数据）
+            if (typeof segmentationMode !== 'undefined' && segmentationMode) {
+                updateUploadArea(true);
+                // 恢复已上传图片的预览
+                for (const [type, canvas] of Object.entries(uploadedImages)) {
+                    const previewEl = document.getElementById('preview-' + type);
+                    const box = document.getElementById('box-' + type);
+                    if (previewEl && box) {
+                        showPreview(type, canvas);
+                    }
+                }
+            }
+        }
+
+        function toggleLanguage() {
+            currentLang = currentLang === 'zh' ? 'en' : 'zh';
+            localStorage.setItem('lang', currentLang);
+            applyI18n();
+        }
+
+        // ==================== 全局状态 ====================
+        let segmentationMode = null; // 'auto'
+        let currentModel = 'pd_t1_resnet';
+        let unetSessions = {};
+        let uploadedImages = {}; // { t1: canvas, pd: canvas, t1Mask: canvas, pdMask: canvas }
+        let processedTensors = {}; // 模型输入tensor
+        let currentPage = 'page-home';
+
+        // ==================== 初始化 ====================
+        document.addEventListener('DOMContentLoaded', () => {
+            initORT();
+            applyI18n();
+            updateBreadcrumb('page-home');
+        });
+
+        function initORT() {
+            if (typeof ort === 'undefined') {
+                console.error('ONNX Runtime not loaded');
+                return;
+            }
+            ort.env.wasm.wasmPaths = './ort-wasm/';
+            ort.env.wasm.numThreads = (typeof self!=="undefined" && self.crossOriginIsolated===true) ? (navigator.hardwareConcurrency||4) : 1;
+            ort.env.wasm.simd = true;
+            ort.env.logLevel = 'warning';
+            console.log('[OR初始化] 线程数:', ort.env.wasm.numThreads, 'SIMD:', ort.env.wasm.simd);
+        }
+
+        // ==================== 页面导航 ====================
+        function showPage(pageId) {
+            document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
+            document.getElementById(pageId).classList.add('active');
+            currentPage = pageId;
+            updateBreadcrumb(pageId);
+            window.scrollTo(0, 0);
+        }
+
+        function updateBreadcrumb(page) {
+            const bc = document.getElementById('breadcrumb');
+            const pages = ['page-home', 'page-upload'];
+            const pageKeys = { 'page-home': 'bc_home', 'page-upload': 'bc_upload' };
+            const currentIdx = pages.indexOf(page);
+            
+            let html = '';
+            pages.forEach((p, i) => {
+                if (i <= currentIdx) {
+                    if (i === currentIdx) {
+                        html += `<span class="breadcrumb-item current">${t(pageKeys[p])}</span>`;
+                    } else {
+                        html += `<span class="breadcrumb-item" onclick="navigateTo('${p}')">${t(pageKeys[p])}</span>`;
+                        html += `<span class="breadcrumb-sep">›</span>`;
+                    }
+                }
+            });
+            bc.innerHTML = html;
+        }
+
+        function navigateTo(pageId) {
+            if (pageId === 'page-home') {
+                if (confirm(t('confirm_home'))) {
+                    resetAll();
+                    showPage('page-home');
+                }
+            } else if (pageId === 'page-upload') {
+                showPage('page-upload');
+            }
+        }
+
+        function goBack() {
+            resetAll();
+            showPage('page-home');
+        }
+
+        function restart() {
+            resetAll();
+            showPage('page-home');
+        }
+
+        // ==================== 选择分割模式 ====================
+        function selectSegmentation() {
+            segmentationMode = 'auto';
+            uploadedImages = {};
+            processedTensors = {};
+            batchCases = {};
+            batchQueue = {};
+            batchWorkerRun = {};
+            updateUploadArea();
+            showPage('page-upload');
+            
+            const title = document.getElementById('uploadTitle');
+            if (title) title.textContent = t('upload_title_auto');
+        }
+
+        // ==================== 更新上传区域 ====================
+        function updateUploadArea(keepData) {
+            const container = document.getElementById('uploadContainer');
+            container.innerHTML = '';
+            if (!keepData) {
+                uploadedImages = {};
+                processedTensors = {};
+            }
+
+            const config = MODEL_CONFIGS[currentModel];
+
+            if (config.type === 'dual') {
+                // 双模态：T1 + PD
+                container.innerHTML = `
+                    <div class="upload-box" id="box-t1" onclick="triggerUpload('t1')">
+                        <input type="file" id="file-t1" accept="image/*,.nii,.nii.gz" multiple style="display:none" onchange="handleFileSelect(event, 't1')">
+                        <div id="preview-t1">
+                            <div class="upload-icon">📷</div>
+                            <p><strong>${t('t1_raw')}</strong></p>
+                            <p class="upload-hint">${t('upload_hint_t1')}</p>
+                        </div>
+                    </div>
+                    <div class="upload-box" id="box-pd" onclick="triggerUpload('pd')">
+                        <input type="file" id="file-pd" accept="image/*,.nii,.nii.gz" multiple style="display:none" onchange="handleFileSelect(event, 'pd')">
+                        <div id="preview-pd">
+                            <div class="upload-icon">📷</div>
+                            <p><strong>${t('pd_raw')}</strong></p>
+                            <p class="upload-hint">${t('upload_hint_pd')}</p>
+                        </div>
+                    </div>
+                `;
+
+            }
+            // 区域重渲染后恢复批量卡片（语言切换等场景）
+            if (keepData) {
+                for (const type of Object.keys(batchCases)) {
+                    if (batchCases[type] && batchCases[type].length) rebuildBatchCards(type);
+                }
+            }
+        }
+
+        function triggerUpload(type) {
+            // 先重置value，确保每次都能触发change事件（即使选同一个文件）
+            const fileInput = document.getElementById('file-' + type);
+            fileInput.value = '';
+            fileInput.click();
+        }
+
+        // ==================== 文件处理 ====================
+        async function handleFileSelect(event, type) {
+            const files = Array.from(event.target.files);
+            if (!files.length) return;
+            // 批量：多个文件，或该序列已进入批量视图
+            if (files.length > 1 || batchCases[type]) {
+                await handleBatchFiles(type, files);
+                return;
+            }
+            const file = files[0];
+
+            showLoading(t('loading_reading'));
+            hideValidation();
+
+            try {
+                let canvas;
+                if (file.name.endsWith('.nii') || file.name.endsWith('.nii.gz')) {
+                    canvas = await loadNiftiFile(file);
+                } else {
+                    canvas = await loadImageFile(file);
+                }
+                uploadedImages[type] = canvas;
+                // 重置相关状态，避免旧数据残留
+                if (processedTensors[type]) delete processedTensors[type];
+                // 清除该图像对应的旧分割掩码，避免与新图不匹配
+                if (uploadedImages[type + 'Mask']) delete uploadedImages[type + 'Mask'];
+                if (processedTensors[type + 'Mask']) delete processedTensors[type + 'Mask'];
+                showPreview(type, canvas);
+
+                // 原图上传后立即进行自动分割
+                if (!type.includes('Mask')) {
+                    await runAutoSegmentation(type);
+                }
+            } catch (e) {
+                console.error(e);
+                showValidation('error', t('err_load_image') + e.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // ==================== 批量处理（单个序列内多文件） ====================
+        const BATCH_MAX = 10;
+        let batchCases = {};      // type -> [{name, items:[{name, blob}]}]
+        let batchQueue = {};      // type -> [File]
+        let batchWorkerRun = {};
+
+        async function handleBatchFiles(type, files) {
+            hideValidation();
+            const modality = type === 'single' ? MODEL_CONFIGS[currentModel].modality : type;
+            const existing = batchCases[type] ? batchCases[type].length : 0;
+            const queued = batchQueue[type] ? batchQueue[type].length : 0;
+            if (existing + queued + files.length > BATCH_MAX) {
+                showValidation('error', t('batch_limit', {n: BATCH_MAX}));
+                files = files.slice(0, Math.max(0, BATCH_MAX - existing - queued));
+            }
+            if (!files.length) return;
+            ensureBatchView(type);
+            if (!batchQueue[type]) batchQueue[type] = [];
+            batchQueue[type].push(...files);
+            if (!batchWorkerRun[type]) {
+                batchWorkerRun[type] = runBatchWorker(type, modality);
+            }
+        }
+
+        function ensureBatchView(type, force) {
+            const previewEl = document.getElementById('preview-' + type);
+            if (!previewEl) return;
+            if (batchCases[type] && !force) { updateBatchProgress(type); return; }
+            if (!batchCases[type]) batchCases[type] = [];
+            previewEl.innerHTML = `
+                <div class="batch-toolbar">
+                    <button type="button" class="btn btn-secondary" onclick="event.stopPropagation();triggerUpload('${type}')">➕ ${t('batch_add')}</button>
+                    <span class="batch-progress" id="batch-progress-${type}"></span>
+                    <button type="button" class="btn btn-primary" onclick="event.stopPropagation();downloadBatchZip('${type}')">📦 ${t('batch_zip')}</button>
+                </div>
+                <div class="batch-list" id="batch-list-${type}"></div>
+            `;
+            // 卡片区域点击不再冒泡到盒子（避免误触发文件选择）
+            previewEl.onclick = (e) => e.stopPropagation();
+            const box = document.getElementById('box-' + type);
+            if (box) box.classList.add('has-image');
+            updateBatchProgress(type);
+        }
+
+        // 语言切换/区域重渲染后，根据已保存的Blobs重建批量卡片
+        function rebuildBatchCards(type) {
+            if (!batchCases[type] || !batchCases[type].length) return;
+            ensureBatchView(type, true);
+            const list = document.getElementById('batch-list-' + type);
+            if (!list) return;
+            for (const c of batchCases[type]) {
+                const overlayItem = c.items.find(it => it.name.endsWith('_overlay.png'));
+                const maskItem = c.items.find(it => it.name.endsWith('_seg.nii'));
+                const card = document.createElement('div');
+                card.className = 'batch-card';
+                card.innerHTML = `<div class="batch-head"><span>${c.name}</span></div>
+                    <div class="batch-status done">${t('batch_seg_done')}</div>
+                    <div class="batch-imgs"></div><div class="batch-dl"></div>`;
+                if (overlayItem) {
+                    const im = document.createElement('img');
+                    im.src = URL.createObjectURL(overlayItem.blob);
+                    card.querySelector('.batch-imgs').appendChild(im);
+                }
+                const dl = card.querySelector('.batch-dl');
+                const addDl = (text, item) => {
+                    const b = document.createElement('button');
+                    b.className = 'btn btn-secondary';
+                    b.textContent = text;
+                    b.onclick = (e) => { e.stopPropagation(); downloadBlob(item.blob, item.name); };
+                    dl.appendChild(b);
+                };
+                if (overlayItem) addDl(t('seg_dl_png_overlay'), overlayItem);
+                if (maskItem) addDl(t('seg_download_mask'), maskItem);
+                list.appendChild(card);
+            }
+            updateBatchProgress(type);
+        }
+
+        async function runBatchWorker(type, modality) {
+            const list = document.getElementById('batch-list-' + type);
+            while (batchQueue[type] && batchQueue[type].length) {
+                const file = batchQueue[type].shift();
+                const base = file.name.replace(/\.(nii(\.gz)?|png|jpe?g)$/i, '');
+                const card = document.createElement('div');
+                card.className = 'batch-card';
+                card.innerHTML = `<div class="batch-head"><span>${base}</span></div>
+                    <div class="batch-status processing">${t('batch_reading')}</div>
+                    <div class="batch-imgs"></div><div class="batch-dl"></div>`;
+                list.appendChild(card);
+                const statusEl = card.querySelector('.batch-status');
+                const imgsEl = card.querySelector('.batch-imgs');
+                const dlEl = card.querySelector('.batch-dl');
+                try {
+                    let canvas;
+                    if (file.name.match(/\.(nii|nii\.gz)$/i)) canvas = await loadNiftiFile(file);
+                    else canvas = await loadImageFile(file);
+                    statusEl.textContent = t('batch_seg_running');
+                    const r = await segmentOneCase(modality, canvas);
+                    const im = document.createElement('img');
+                    im.src = URL.createObjectURL(r.overlayBlob);
+                    imgsEl.appendChild(im);
+                    const items = [];
+                    const addDl = (text, blob, fname) => {
+                        const b = document.createElement('button');
+                        b.className = 'btn btn-secondary';
+                        b.textContent = text;
+                        b.onclick = (e) => { e.stopPropagation(); downloadBlob(blob, fname); };
+                        dlEl.appendChild(b);
+                        items.push({name: fname, blob});
+                    };
+                    addDl(t('seg_dl_png_overlay'), r.overlayBlob, base + '_overlay.png');
+                    if (r.maskBlob) addDl(t('seg_download_mask'), r.maskBlob, base + '_seg.nii');
+                    batchCases[type].push({name: base, items});
+                    statusEl.className = 'batch-status done';
+                    statusEl.textContent = t('batch_seg_done');
+                } catch (e) {
+                    console.error('batch case failed', e);
+                    statusEl.className = 'batch-status failed';
+                    statusEl.textContent = t('batch_seg_failed') + e.message;
+                }
+                updateBatchProgress(type);
+            }
+            batchWorkerRun[type] = null;
+        }
+
+        // 单个病例的完整分割流程（不依赖固定DOM），返回叠加图与掩码Blob
+        async function segmentOneCase(modality, canvas) {
+            if (!unetSessions[modality]) {
+                showLoading(t('loading_unet'));
+                unetSessions[modality] = await ort.InferenceSession.create(UNET_CONFIGS[modality], {
+                    executionProviders: ['wasm'],
+                    graphOptimizationLevel: 'all'
+                });
+                hideLoading();
+            }
+            const segResult = preprocessForSegmentation(canvas);
+            const res = await unetSessions[modality].run({input: segResult.tensor});
+            const output = {data: res.output.data, dims: [1, 3, segResult.height, segResult.width], type: 'float32'};
+            const post = postprocessSegmentation(output, segResult.width, segResult.height,
+                segResult.canvasW, segResult.canvasH, segResult.trainW, segResult.trainH);
+            const W = segResult.canvasW, H = segResult.canvasH;
+            const ovC = document.createElement('canvas');
+            ovC.width = W; ovC.height = H;
+            const octx = ovC.getContext('2d');
+            octx.drawImage(canvas, 0, 0, W, H);
+            octx.drawImage(post.segCanvas, 0, 0, W, H);
+            const overlayBlob = await new Promise(resolve => ovC.toBlob(resolve));
+            let maskBlob = null;
+            if (canvas.isNifti && canvas.niftiHeader) {
+                const labels = post.maskCanvas.rawLabels;
+                const finalLabels = new Int16Array(W * H);
+                for (let i = 0; i < W * H && i < labels.length; i++) finalLabels[i] = labels[i];
+                maskBlob = buildNiftiBlob(finalLabels, W, H, canvas.niftiHeader);
+            }
+            return {overlayBlob, maskBlob};
+        }
+
+        function updateBatchProgress(type) {
+            const el = document.getElementById('batch-progress-' + type);
+            if (!el) return;
+            const done = batchCases[type] ? batchCases[type].length : 0;
+            const queued = batchQueue[type] ? batchQueue[type].length : 0;
+            el.textContent = t('batch_progress', {done, total: done + queued});
+        }
+
+        async function downloadBatchZip(type) {
+            const cases = batchCases[type];
+            if (!cases || !cases.length) { showValidation('error', t('batch_zip_empty')); return; }
+            try {
+                showLoading(t('batch_zipping'));
+                const zip = new JSZip();
+                for (const c of cases) {
+                    const folder = zip.folder(c.name);
+                    for (const it of c.items) folder.file(it.name, it.blob);
+                }
+                const content = await zip.generateAsync({type: 'blob'});
+                const seq = type === 'single' ? MODEL_CONFIGS[currentModel].modality : type;
+                downloadBlob(content, 'KneeEpiSeg_' + seq + '_batch.zip');
+            } catch (e) {
+                console.error(e);
+                showValidation('error', t('batch_zip_failed') + e.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        function downloadBlob(blob, fname) {
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url; a.download = fname;
+            document.body.appendChild(a); a.click(); document.body.removeChild(a);
+            setTimeout(() => URL.revokeObjectURL(url), 5000);
+        }
+
+        function loadImageFile(file) {
+            return new Promise((resolve, reject) => {
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    const img = new Image();
+                    img.onload = () => {
+                        const canvas = document.createElement('canvas');
+                        canvas.width = img.width;
+                        canvas.height = img.height;
+                        const ctx = canvas.getContext('2d');
+                        ctx.drawImage(img, 0, 0);
+                        resolve(canvas);
+                    };
+                    img.onerror = reject;
+                    img.src = e.target.result;
+                };
+                reader.onerror = reject;
+                reader.readAsDataURL(file);
+            });
+        }
+
+        function loadNiftiFile(file) {
+            return new Promise((resolve, reject) => {
+                if (typeof niftiReader === 'undefined' && typeof nifti === 'undefined') {
+                    reject(new Error(t('err_nifti_lib')));
+                    return;
+                }
+                const lib = window.niftiReader || window.nifti;
+
+                const reader = new FileReader();
+                reader.onload = (e) => {
+                    try {
+                        let data = e.target.result;
+                        if (lib.isCompressed(data)) {
+                            data = lib.decompress(data);
+                        }
+                        const header = lib.readHeader(data);
+                        const imgBuffer = lib.readImage(header, data);
+
+                        const width = header.dims[1];
+                        const height = header.dims[2];
+                        const depth = header.dims[3] || 1;
+                        const datatype = header.datatypeCode;
+                        const bpv = header.numBitsPerVoxel / 8;
+                        // 兼容不同字段名，正确处理scl_slope=0的情况
+                        const rawSlope = header.scl_slope !== undefined ? header.scl_slope : (header.sclSlope !== undefined ? header.sclSlope : 1.0);
+                        const rawInter = header.scl_inter !== undefined ? header.scl_inter : (header.sclInter !== undefined ? header.sclInter : 0.0);
+                        const sclSlope = (rawSlope === 0 || rawSlope === null || !isFinite(rawSlope)) ? 1.0 : rawSlope;
+                        const sclInter = (rawInter === null || !isFinite(rawInter)) ? 0.0 : rawInter;
+                        // 使用NIfTI头部检测的字节序，而非硬编码
+                        const isLE = header.littleEndian !== undefined ? header.littleEndian : true;
+
+                        // 训练代码取第一个切片：roi_data[:, :, 0]
+                        const sliceIndex = 0;
+                        const sliceSize = width * height;
+                        const sliceOffset = sliceIndex * sliceSize * bpv;
+
+                        const view = new DataView(imgBuffer);
+                        // 保留原始float32数据（应用scl_slope/scl_inter，与nibabel一致）
+                        const rawPixels = new Float32Array(sliceSize);
+
+                        for (let i = 0; i < sliceSize; i++) {
+                            const offset = sliceOffset + i * bpv;
+                            let val;
+                            switch(datatype) {
+                                case 2: val = view.getUint8(offset); break;
+                                case 4: val = view.getInt16(offset, isLE); break;
+                                case 8: val = view.getInt32(offset, isLE); break;
+                                case 16: val = view.getFloat32(offset, isLE); break;
+                                case 64: val = view.getFloat64(offset, isLE); break;
+                                case 256: val = view.getInt8(offset); break;
+                                case 512: val = view.getUint16(offset, isLE); break;
+                                case 768: val = view.getUint32(offset, isLE); break;
+                                default: val = view.getFloat32(offset, isLE);
+                            }
+                            // 应用NIfTI缩放（nibabel默认行为：真实值 = 存储值 * slope + inter）
+                            rawPixels[i] = val * sclSlope + sclInter;
+                        }
+
+                        // 转成canvas用于显示（百分位裁剪增强MRI对比度）
+                        const canvas = document.createElement('canvas');
+                        canvas.width = width;
+                        canvas.height = height;
+                        // 把原始float32数据挂到canvas上，供后续模型推理使用
+                        canvas.rawData = rawPixels;
+                        canvas.rawWidth = width;
+                        canvas.rawHeight = height;
+                        canvas.isNifti = true;
+                        canvas.niftiHeader = header;
+                        canvas.originalFileName = file.name;
+                        const ctx = canvas.getContext('2d');
+                        const imgData = ctx.createImageData(width, height);
+
+                        // 用1%和99%百分位裁剪显示（MRI常用，避免极端噪声值压缩对比度）
+                        const sorted = Array.from(rawPixels).sort((a, b) => a - b);
+                        const p1 = sorted[Math.floor(sorted.length * 0.01)];
+                        const p99 = sorted[Math.floor(sorted.length * 0.99)];
+                        const dispRange = p99 - p1;
+
+                        for (let i = 0; i < sliceSize; i++) {
+                            let val = rawPixels[i];
+                            if (dispRange > 0) {
+                                val = ((val - p1) / dispRange) * 255;
+                            }
+                            val = Math.max(0, Math.min(255, val));
+                            imgData.data[i*4] = val;
+                            imgData.data[i*4+1] = val;
+                            imgData.data[i*4+2] = val;
+                            imgData.data[i*4+3] = 255;
+                        }
+                        ctx.putImageData(imgData, 0, 0);
+                        resolve(canvas);
+                    } catch (err) {
+                        reject(err);
+                    }
+                };
+                reader.onerror = reject;
+                reader.readAsArrayBuffer(file);
+            });
+        }
+
+        function showPreview(type, canvas) {
+            const previewEl = document.getElementById('preview-' + type);
+            const box = document.getElementById('box-' + type);
+            const isMask = type.includes('Mask');
+            const label = isMask ? t('label_mask') : 
+                          (type === 't1' ? t('label_t1') : type === 'pd' ? t('label_pd') : t('label_raw'));
+
+            previewEl.innerHTML = `
+                <div class="preview-container">
+                    <img src="${canvas.toDataURL()}" class="preview-image">
+                    <span class="preview-label">${label}</span>
+                </div>
+            `;
+            box.classList.add('has-image');
+        }
+
+        // ==================== 自动分割（U-Net） ====================
+        async function runAutoSegmentation(imageType) {
+            const modality = imageType === 'single' ? MODEL_CONFIGS[currentModel].modality : imageType;
+            const unetKey = modality;
+
+            // 显示分割状态
+            const previewEl = document.getElementById('preview-' + imageType);
+            const statusDiv = document.createElement('div');
+            statusDiv.className = 'auto-segment-status processing';
+            statusDiv.id = 'seg-status-' + imageType;
+            statusDiv.textContent = t('seg_loading');
+            previewEl.appendChild(statusDiv);
+
+            try {
+                // 加载U-Net模型
+                if (!unetSessions[unetKey]) {
+                    updateLoadingText(t('loading_unet'));
+                    unetSessions[unetKey] = await ort.InferenceSession.create(UNET_CONFIGS[unetKey], {
+                        executionProviders: ['wasm'],
+                        graphOptimizationLevel: 'all'
+                    });
+
+                try {
+                    const tN=256;
+                    const tD=new Float32Array(tN*tN).fill(0.5);
+                    const tT=new ort.Tensor("float32",tD,[1,1,tN,tN]);
+                    const tO=await unetSessions[unetKey].run({"input":tT});
+                    const td=tO["output"].data;
+                    let m0=0,m1=0,m2=0;
+                    for(let j=0;j<tN*tN;j++){m0+=td[j];m1+=td[tN*tN+j];m2+=td[2*tN*tN+j];}
+                    m0/=tN*tN;m1/=tN*tN;m2/=tN*tN;
+                    console.log("[U-Net自检] "+unetKey+" ch0="+m0.toFixed(3)+" ch1="+m1.toFixed(3)+" ch2="+m2.toFixed(3));
+                } catch(e) { console.warn('[selftest]',e); }
+                }
+
+                updateLoadingText(t('loading_seg'));
+
+                const originalCanvas = uploadedImages[imageType];
+
+                // 预处理：完全对齐训练代码（百分位裁剪+min-max+bicubic resize到16的倍数）
+                const segResult = preprocessForSegmentation(originalCanvas);
+                const segTensor = segResult.tensor;
+                const segW = segResult.width;
+                const segH = segResult.height;
+
+                // ===== 已禁用方向检测，直接用原始图像推理 =====
+                const fullTensor = segTensor;
+                const fullRes = await unetSessions[unetKey].run({'input': fullTensor});
+                const fullOut = fullRes['output'].data;
+                const fOH = segH, fOW = segW;
+
+                const output = {data: fullOut, dims:[1,3,segH,segW], type:'float32'};
+                console.log('[U-Net推理] 完成（无方向旋转），输出shape:', output.dims);
+
+                // 使用原始尺寸（不旋转）
+                const rSegW = segW, rSegH = segH;
+                const rCanvasW = segResult.canvasW, rCanvasH = segResult.canvasH;
+                const rTrainW = segResult.trainW, rTrainH = segResult.trainH;
+
+                // 不旋转原始Canvas，直接使用原图
+                uploadedImages[imageType] = originalCanvas;
+                console.log('[方向检测] 已禁用，使用原始图像方向');
+
+                // 后处理：argmax得到分割mask和彩色分割图（旋转后的尺寸）
+                const segPost = postprocessSegmentation(output, rSegW, rSegH, rCanvasW, rCanvasH, rTrainW, rTrainH);
+                const maskCanvas = segPost.maskCanvas;
+                const colorCanvas = segPost.segCanvas;
+                uploadedImages[imageType + 'Mask'] = maskCanvas;
+
+                // 更新状态
+                statusDiv.className = 'auto-segment-status done';
+                statusDiv.textContent = t('seg_done');
+
+                // 显示彩色分割结果预览
+                showSegmentationPreview(imageType, originalCanvas, colorCanvas);
+
+                addMaskDownloads(imageType, previewEl, originalCanvas, maskCanvas, colorCanvas, segResult);
+
+                // 处理ROI
+                processImageWithMask(imageType);
+
+            } catch (e) {
+                console.error('Auto segmentation failed:', e);
+                statusDiv.className = 'auto-segment-status pending';
+                statusDiv.textContent = t('seg_failed');
+                // 分割失败时不使用mask，直接用原图
+                processedTensors[imageType] = preprocessForPrediction(uploadedImages[imageType], null, MODEL_CONFIGS[currentModel].inputSize);
+            }
+        }
+
+        // Lanczos-3 重采样（精确复刻 Pillow/PIL Image.LANCZOS，与训练代码一致）
+        function lanczosResizeFloat32(src, srcW, srcH, dstW, dstH) {
+            const A = 3.0;
+            function sinc(x) {
+                if (Math.abs(x) < 1e-9) return 1.0;
+                const px = Math.PI * x;
+                return Math.sin(px) / px;
+            }
+            function lanczosFilter(x) {
+                if (Math.abs(x) >= A) return 0.0;
+                return sinc(x) * sinc(x / A);
+            }
+            // 与 Pillow precompute_coeffs 完全一致的权重计算
+            function buildWeights(inSize, outSize) {
+                const scale = inSize / outSize;
+                const filterscale = scale >= 1.0 ? scale : 1.0;
+                const support = A * filterscale;
+                const ss = 1.0 / filterscale;
+                const weights = [];
+                for (let xx = 0; xx < outSize; xx++) {
+                    const center = (xx + 0.5) * scale;
+                    let xmin = Math.trunc(center - support + 0.5);
+                    if (xmin < 0) xmin = 0;
+                    let xmax = Math.trunc(center + support + 0.5);
+                    if (xmax > inSize) xmax = inSize;
+                    xmax -= xmin;
+                    const ws = [];
+                    let ww = 0.0;
+                    for (let x = 0; x < xmax; x++) {
+                        const w = lanczosFilter((x + xmin - center + 0.5) * ss);
+                        ws.push([x + xmin, w]);
+                        ww += w;
+                    }
+                    if (ww !== 0) {
+                        for (let i = 0; i < ws.length; i++) ws[i][1] /= ww;
+                    }
+                    weights.push(ws);
+                }
+                return weights;
+            }
+            // 水平方向（用 Float64 中间精度，与 Pillow 一致）
+            const xw = buildWeights(srcW, dstW);
+            const tmp = new Float64Array(srcH * dstW);
+            for (let y = 0; y < srcH; y++) {
+                for (let x = 0; x < dstW; x++) {
+                    let v = 0.0;
+                    const ws = xw[x];
+                    for (let k = 0; k < ws.length; k++) {
+                        v += src[y * srcW + ws[k][0]] * ws[k][1];
+                    }
+                    tmp[y * dstW + x] = v;
+                }
+            }
+            // 垂直方向
+            const yw = buildWeights(srcH, dstH);
+            const dst = new Float32Array(dstW * dstH);
+            for (let y = 0; y < dstH; y++) {
+                for (let x = 0; x < dstW; x++) {
+                    let v = 0.0;
+                    const ws = yw[y];
+                    for (let k = 0; k < ws.length; k++) {
+                        v += tmp[ws[k][0] * dstW + x] * ws[k][1];
+                    }
+                    dst[y * dstW + x] = v;
+                }
+            }
+            return dst;
+        }
+
+        function preprocessForSegmentation(canvas) {
+            // 训练代码: nibabel返回shape(dims[1],dims[2]) -> expand_dims -> [1,dims[1],dims[2]]
+            // PyTorch Conv2d解释为[B,C,H=dims[1],W=dims[2]]
+            // 但Canvas数据按y*width+x排列(width=dims[1],height=dims[2])，即H=dims[2],W=dims[1]
+            // 所以需要转置数据，使H=dims[1],W=dims[2]（与训练一致）
+            let data;
+            let outW, outH;
+            let trainW, trainH;  // 训练时的原始W和H（转置后）
+            let canvasW, canvasH; // Canvas原始尺寸
+
+            if (canvas.isNifti && canvas.rawData) {
+                canvasW = canvas.rawWidth;   // dims[1]
+                canvasH = canvas.rawHeight;  // dims[2]
+                let pixels = new Float32Array(canvas.rawData);
+
+                let rawMin = Infinity, rawMax = -Infinity;
+                for (let i = 0; i < pixels.length; i++) {
+                    if (pixels[i] < rawMin) rawMin = pixels[i];
+                    if (pixels[i] > rawMax) rawMax = pixels[i];
+                }
+                console.log('[U-Net预处理] 原始数据:', {canvasW: canvasW, canvasH: canvasH, min: rawMin, max: rawMax});
+
+                // 百分位裁剪
+                const sorted = Array.from(pixels).sort((a, b) => a - b);
+                const n = sorted.length;
+                function npPercentile(arr, q) {
+                    const idx = (n - 1) * q / 100;
+                    const lo = Math.floor(idx);
+                    const hi = Math.ceil(idx);
+                    if (lo === hi) return arr[lo];
+                    return arr[lo] * (hi - idx) + arr[hi] * (idx - lo);
+                }
+                const p1 = npPercentile(sorted, 1);
+                const p99 = npPercentile(sorted, 99);
+                for (let i = 0; i < pixels.length; i++) {
+                    pixels[i] = Math.max(p1, Math.min(p99, pixels[i]));
+                }
+                console.log('[U-Net预处理] 百分位裁剪: p1=' + p1.toFixed(4) + ', p99=' + p99.toFixed(4));
+
+                // min-max归一化
+                let minVal = Infinity, maxVal = -Infinity;
+                for (let i = 0; i < pixels.length; i++) {
+                    if (pixels[i] < minVal) minVal = pixels[i];
+                    if (pixels[i] > maxVal) maxVal = pixels[i];
+                }
+                const range = maxVal - minVal;
+                if (range < 1e-6) {
+                    for (let i = 0; i < pixels.length; i++) pixels[i] = 0;
+                } else {
+                    for (let i = 0; i < pixels.length; i++) {
+                        pixels[i] = (pixels[i] - minVal) / (range + 1e-6);
+                    }
+                }
+                console.log('[U-Net预处理] 归一化后: min=' + minVal.toFixed(4) + ', max=' + maxVal.toFixed(4));
+
+                // 转置：Canvas[y*canvasW+x] -> 训练格式[x*canvasH+y]
+                // 训练格式shape: [H=canvasW, W=canvasH]
+                trainH = canvasW;  // H = dims[1]
+                trainW = canvasH;  // W = dims[2]
+                const transposed = new Float32Array(trainH * trainW);
+                for (let y = 0; y < canvasH; y++) {
+                    for (let x = 0; x < canvasW; x++) {
+                        transposed[x * canvasH + y] = pixels[y * canvasW + x];
+                    }
+                }
+                console.log('[U-Net预处理] 转置后: trainH=' + trainH + ', trainW=' + trainW + ' (H=dims[1], W=dims[2])');
+
+                // resize_to_divisible: pad到16倍数
+                outH = Math.ceil(trainH / 16) * 16;
+                outW = Math.ceil(trainW / 16) * 16;
+                if (outH === trainH && outW === trainW) {
+                    data = transposed;
+                    console.log('[U-Net预处理] 尺寸已是16倍数，无需resize');
+                } else {
+                    data = resizeBicubic(transposed, trainW, trainH, outW, outH);
+                    let resMin = Infinity, resMax = -Infinity;
+                    for (let i = 0; i < data.length; i++) {
+                        if (data[i] < resMin) resMin = data[i];
+                        if (data[i] > resMax) resMax = data[i];
+                    }
+                    console.log('[U-Net预处理] resize到' + outH + 'x' + outW + '后: min=' + resMin.toFixed(4) + ', max=' + resMax.toFixed(4));
+                }
+            } else {
+                canvasW = canvas.width;
+                canvasH = canvas.height;
+                trainH = canvasW;
+                trainW = canvasH;
+                outH = Math.ceil(trainH / 16) * 16;
+                outW = Math.ceil(trainW / 16) * 16;
+                const tmpCanvas = document.createElement('canvas');
+                tmpCanvas.width = canvasW;
+                tmpCanvas.height = canvasH;
+                const ctx = tmpCanvas.getContext('2d');
+                ctx.drawImage(canvas, 0, 0);
+                const imgData = ctx.getImageData(0, 0, canvasW, canvasH);
+                const pixels = new Float32Array(canvasW * canvasH);
+                for (let i = 0; i < canvasW * canvasH; i++) {
+                    pixels[i] = imgData.data[i * 4] / 255.0;
+                }
+                // 转置
+                const transposed = new Float32Array(trainH * trainW);
+                for (let y = 0; y < canvasH; y++) {
+                    for (let x = 0; x < canvasW; x++) {
+                        transposed[x * canvasH + y] = pixels[y * canvasW + x];
+                    }
+                }
+                if (outH === trainH && outW === trainW) {
+                    data = transposed;
+                } else {
+                    data = resizeBicubic(transposed, trainW, trainH, outW, outH);
+                }
+            }
+            return {
+                tensor: new ort.Tensor('float32', data, [1, 1, outH, outW]),
+                width: outW,
+                height: outH,
+                canvasW: canvasW,
+                canvasH: canvasH,
+                trainW: trainW,
+                trainH: trainH
+            };
+        }
+
+        function resizeBicubic(src, srcW, srcH, dstW, dstH) {
+            // 双三次插值，对齐PyTorch mode='bicubic', align_corners=False
+            // src_x = (dst_x + 0.5) * (srcW/dstW) - 0.5
+            const dst = new Float32Array(dstW * dstH);
+            const xRatio = srcW / dstW;
+            const yRatio = srcH / dstH;
+
+            function cubic(t) {
+                // PyTorch bicubic: Keys cubic convolution with a=-0.75
+                // |t|<=1: (a+2)|t|^3 - (a+3)|t|^2 + 1
+                // 1<|t|<=2: a|t|^3 - 5a|t|^2 + 8a|t| - 4a
+                t = Math.abs(t);
+                if (t <= 1) return 1.25*t*t*t - 2.25*t*t + 1;
+                if (t <= 2) return -0.75*t*t*t + 3.75*t*t - 6*t + 3;
+                return 0;
+            }
+
+            for (let y = 0; y < dstH; y++) {
+                // PyTorch: 不clip采样坐标，边界外通过replicate padding处理
+                const srcY = (y + 0.5) * yRatio - 0.5;
+                const y0 = Math.floor(srcY);
+                for (let x = 0; x < dstW; x++) {
+                    const srcX = (x + 0.5) * xRatio - 0.5;
+                    const x0 = Math.floor(srcX);
+                    let val = 0;
+                    for (let m = -1; m <= 2; m++) {
+                        const wy = cubic(srcY - (y0 + m));
+                        // replicate padding: 边界外使用边界像素值
+                        const sy = Math.max(0, Math.min(srcH - 1, y0 + m));
+                        for (let n = -1; n <= 2; n++) {
+                            const wx = cubic(srcX - (x0 + n));
+                            const sx = Math.max(0, Math.min(srcW - 1, x0 + n));
+                            val += src[sy * srcW + sx] * wx * wy;
+                        }
+                    }
+                    // 不clamp输出，与PyTorch一致
+                    dst[y * dstW + x] = val;
+                }
+            }
+            return dst;
+        }
+
+
+        function buildNiftiBlob(labels, width, height, origHeader) {
+            // 生成NIfTI-1格式的.nii文件（未压缩，int16数据）
+            // labels: Int16Array, length=width*height, values 0/1/2
+            // 使用原始文件的affine/dims/pixdim，确保ITK-SNAP打开时与原图对齐
+            const numVoxels = width * height;
+            const headerSize = 352; // 348 header + 4 extension
+            const dataSize = numVoxels * 2; // int16
+            const buf = new ArrayBuffer(headerSize + dataSize);
+            const dv = new DataView(buf);
+            const le = true; // little endian
+
+            // sizeof_hdr = 348
+            dv.setInt32(0, 348, le);
+            // dim_info = 0
+            dv.setUint8(39, 0);
+            // dims: dim[0]=3, dim[1]=width, dim[2]=height, dim[3]=1, rest=1
+            dv.setInt16(40, 3, le);
+            dv.setInt16(42, width, le);
+            dv.setInt16(44, height, le);
+            dv.setInt16(46, 1, le);
+            for (let i = 4; i < 8; i++) dv.setInt16(40 + i * 2, 1, le);
+            // intent_p1/p2/p3 = 0, intent_code = 0
+            // datatype = 4 (int16), bitpix = 16
+            dv.setInt16(70, 4, le);
+            dv.setInt16(72, 16, le);
+            // slice_start = 0
+            // pixdim: copy from original or defaults
+            const pd = origHeader.pixDims || [1, 0.2, 0.2, 1, 0, 0, 0, 0];
+            for (let i = 0; i < 8; i++) dv.setFloat32(76 + i * 4, pd[i] != null ? pd[i] : (i === 0 ? 1 : 0), le);
+            // vox_offset = 352.0
+            dv.setFloat32(108, 352.0, le);
+            // scl_slope = 1.0, scl_inter = 0.0
+            dv.setFloat32(112, 1.0, le);
+            dv.setFloat32(116, 0.0, le);
+            // slice_end = 0, slice_code = 0
+            // xyzt_units: copy from original
+            dv.setUint8(123, origHeader.xyzt_units || 0);
+            // cal_max/min = 0, slice_duration = 0, toffset = 0
+            // glmax/glmin = 0
+            // descrip: set a description
+            const descText = 'Knee MRI auto-segmentation mask (0=bg,1=femur,2=tibia)';
+            const descBytes = new TextEncoder().encode(descText);
+            for (let i = 0; i < 80 && i < descBytes.length; i++) dv.setUint8(148 + i, descBytes[i]);
+            // aux_file = empty
+            // qform_code, sform_code: copy from original
+            dv.setInt16(252, origHeader.qform_code || 0, le);
+            dv.setInt16(254, origHeader.sform_code || 2, le);
+            // quatern_b,c,d: copy from original
+            dv.setFloat32(256, origHeader.quatern_b || 0, le);
+            dv.setFloat32(260, origHeader.quatern_c || 0, le);
+            dv.setFloat32(264, origHeader.quatern_d || 0, le);
+            // qoffset_x,y,z: copy from original
+            dv.setFloat32(268, origHeader.qoffset_x || 0, le);
+            dv.setFloat32(272, origHeader.qoffset_y || 0, le);
+            dv.setFloat32(276, origHeader.qoffset_z || 0, le);
+            // srow_x/y/z: copy from original affine
+            const aff = origHeader.affine || [[0.2,0,0,0],[0,0.2,0,0],[0,0,1,0],[0,0,0,1]];
+            for (let r = 0; r < 3; r++) {
+                for (let c = 0; c < 4; c++) {
+                    dv.setFloat32(280 + (r * 4 + c) * 4, aff[r][c] || 0, le);
+                }
+            }
+            // intent_name = empty
+            // magic = "n+1\0"
+            dv.setUint8(344, 0x6E); // 'n'
+            dv.setUint8(345, 0x2B); // '+'
+            dv.setUint8(346, 0x31); // '1'
+            dv.setUint8(347, 0x00);
+            // extension: 4 bytes = 0 (no extension)
+            dv.setInt32(348, 0, le);
+            // data: int16 labels
+            for (let i = 0; i < numVoxels; i++) {
+                dv.setInt16(headerSize + i * 2, labels[i] | 0, le);
+            }
+            return new Blob([buf], { type: 'application/octet-stream' });
+        }
+
+        function postprocessSegmentation(output, segW, segH, canvasW, canvasH, trainW, trainH) {
+            // output: [1,3,segH,segW] raw logits, segH=ceil(trainH/16)*16, segW=ceil(trainW/16)*16
+            // trainH=canvasW=dims[1], trainW=canvasH=dims[2]
+            // 需要: 1)argmax 2)resize回[trainH,trainW] 3)转置回[canvasH,canvasW]
+            const data = output.data;
+
+            let outMin = Infinity, outMax = -Infinity;
+            for (let i = 0; i < data.length; i++) {
+                if (data[i] < outMin) outMin = data[i];
+                if (data[i] > outMax) outMax = data[i];
+            }
+            console.log('[U-Net后处理] 模型输出范围: min=' + outMin.toFixed(4) + ', max=' + outMax.toFixed(4));
+
+            // argmax on train-format data [segH, segW]
+            const segLabels = new Uint8Array(segH * segW);
+            let bgCount = 0, femurCount = 0, tibiaCount = 0;
+            for (let h = 0; h < segH; h++) {
+                for (let w = 0; w < segW; w++) {
+                    const idx = h * segW + w;
+                    const p0 = data[0 * segH * segW + idx];
+                    const p1 = data[1 * segH * segW + idx];
+                    const p2 = data[2 * segH * segW + idx];
+                    let maxClass = 0;
+                    let maxProb = p0;
+                    if (p1 > maxProb) { maxProb = p1; maxClass = 1; }
+                    if (p2 > maxProb) { maxProb = p2; maxClass = 2; }
+                    segLabels[idx] = maxClass;
+                    if (maxClass === 0) bgCount++;
+                    else if (maxClass === 1) femurCount++;
+                    else tibiaCount++;
+                }
+            }
+            console.log('[U-Net后处理] 像素统计(训练格式): 背景=' + bgCount + '(' + (bgCount*100/(bgCount+femurCount+tibiaCount)).toFixed(1) + '%), 股骨=' + femurCount + '(' + (femurCount*100/(bgCount+femurCount+tibiaCount)).toFixed(1) + '%), 胫骨=' + tibiaCount + '(' + (tibiaCount*100/(bgCount+femurCount+tibiaCount)).toFixed(1) + '%)');
+
+            // nearest resize从[segH,segW]回[trainH,trainW]
+            const trainLabels = new Uint8Array(trainH * trainW);
+            for (let h = 0; h < trainH; h++) {
+                const srcH = Math.min(segH - 1, Math.floor(h * segH / trainH));
+                for (let w = 0; w < trainW; w++) {
+                    const srcW = Math.min(segW - 1, Math.floor(w * segW / trainW));
+                    trainLabels[h * trainW + w] = segLabels[srcH * segW + srcW];
+                }
+            }
+
+            // ===== 后处理：去碎片 + 填空洞 =====
+            function cleanupLabels(labels, H, W, label) {
+                // 二值mask: 1=该类别, 0=其他
+                const mask = new Uint8Array(H * W);
+                for (let i = 0; i < H * W; i++) mask[i] = (labels[i] === label) ? 1 : 0;
+
+                // 1. 连通域分析（4邻域flood fill），保留最大连通域
+                const visited = new Uint8Array(H * W);
+                const components = [];
+                for (let i = 0; i < H * W; i++) {
+                    if (mask[i] && !visited[i]) {
+                        const comp = [];
+                        const stack = [i];
+                        visited[i] = 1;
+                        while (stack.length > 0) {
+                            const p = stack.pop();
+                            comp.push(p);
+                            const py = (p / W) | 0, px = p % W;
+                            const neighbors = [p-1, p+1, p-W, p+W];
+                            for (const ni of neighbors) {
+                                if (ni >= 0 && ni < H*W && mask[ni] && !visited[ni]) {
+                                    const ny = (ni / W) | 0, nx = ni % W;
+                                    if (Math.abs(ny - py) + Math.abs(nx - px) === 1) {
+                                        visited[ni] = 1;
+                                        stack.push(ni);
+                                    }
+                                }
+                            }
+                        }
+                        components.push(comp);
+                    }
+                }
+                if (components.length > 0) {
+                    components.sort((a, b) => b.length - a.length);
+                    const keep = new Uint8Array(H * W);
+                    for (const p of components[0]) keep[p] = 1;
+                    // 只保留最大连通域（骨骺部位不应分散）
+                    // 小碎片全部去除
+                    for (let i = 0; i < H * W; i++) mask[i] = keep[i];
+                }
+
+                // 2. 填空洞：从边界flood fill背景，未被访问的背景就是空洞
+                const bgVisited = new Uint8Array(H * W);
+                const stack = [];
+                for (let x = 0; x < W; x++) {
+                    if (!mask[x]) { bgVisited[x] = 1; stack.push(x); }
+                    if (!mask[(H-1)*W + x]) { bgVisited[(H-1)*W + x] = 1; stack.push((H-1)*W + x); }
+                }
+                for (let y = 0; y < H; y++) {
+                    if (!mask[y*W]) { bgVisited[y*W] = 1; stack.push(y*W); }
+                    if (!mask[y*W + W-1]) { bgVisited[y*W + W-1] = 1; stack.push(y*W + W-1); }
+                }
+                while (stack.length > 0) {
+                    const p = stack.pop();
+                    const py = (p / W) | 0, px = p % W;
+                    const neighbors = [p-1, p+1, p-W, p+W];
+                    for (const ni of neighbors) {
+                        if (ni >= 0 && ni < H*W && !mask[ni] && !bgVisited[ni]) {
+                            const ny = (ni / W) | 0, nx = ni % W;
+                            if (Math.abs(ny - py) + Math.abs(nx - px) === 1) {
+                                bgVisited[ni] = 1;
+                                stack.push(ni);
+                            }
+                        }
+                    }
+                }
+                // 未被bgVisited标记的背景像素 = 空洞，填充为前景
+                for (let i = 0; i < H * W; i++) {
+                    if (!mask[i] && !bgVisited[i]) mask[i] = 1;
+                }
+
+                return mask;
+            }
+
+            // 对股骨(1)和胫骨(2)分别清理
+            const femurMask = cleanupLabels(trainLabels, trainH, trainW, 1);
+            const tibiaMask = cleanupLabels(trainLabels, trainH, trainW, 2);
+
+            // 合并：股骨优先于胫骨（如果重叠，股骨赢）
+            for (let i = 0; i < trainH * trainW; i++) {
+                if (femurMask[i]) trainLabels[i] = 1;
+                else if (tibiaMask[i]) trainLabels[i] = 2;
+                else trainLabels[i] = 0;
+            }
+            console.log('[U-Net后处理] 后处理完成：去碎片+填空洞');
+
+            // 转置回Canvas格式: trainLabels[h*trainW+w] -> canvasLabels[w*canvasW+h]
+            // canvasW=trainH, canvasH=trainW
+            const canvasLabels = new Uint8Array(canvasH * canvasW);
+            for (let h = 0; h < trainH; h++) {
+                for (let w = 0; w < trainW; w++) {
+                    canvasLabels[w * canvasW + h] = trainLabels[h * trainW + w];
+                }
+            }
+
+            // 生成彩色分割图（Canvas尺寸）
+            const segCanvas = document.createElement('canvas');
+            segCanvas.width = canvasW;
+            segCanvas.height = canvasH;
+            const segCtx = segCanvas.getContext('2d');
+            const segImgData = segCtx.createImageData(canvasW, canvasH);
+            for (let y = 0; y < canvasH; y++) {
+                for (let x = 0; x < canvasW; x++) {
+                    const label = canvasLabels[y * canvasW + x];
+                    const di = (y * canvasW + x) * 4;
+                    if (label === 1) {
+                        segImgData.data[di] = 255; segImgData.data[di+1] = 0; segImgData.data[di+2] = 0; segImgData.data[di+3] = 180;
+                    } else if (label === 2) {
+                        segImgData.data[di] = 0; segImgData.data[di+1] = 255; segImgData.data[di+2] = 0; segImgData.data[di+3] = 180;
+                    }
+                }
+            }
+            segCtx.putImageData(segImgData, 0, 0);
+
+            // maskCanvas for age prediction
+            const maskCanvas = document.createElement('canvas');
+            maskCanvas.width = canvasW;
+            maskCanvas.height = canvasH;
+            maskCanvas.rawData = new Float32Array(canvasW * canvasH);
+            maskCanvas.rawWidth = canvasW;
+            maskCanvas.rawHeight = canvasH;
+            maskCanvas.rawLabels = new Uint8Array(canvasW * canvasH);
+            for (let i = 0; i < canvasW * canvasH; i++) {
+                maskCanvas.rawData[i] = canvasLabels[i] > 0 ? 1.0 : 0.0;
+                maskCanvas.rawLabels[i] = canvasLabels[i];
+            }
+
+            return { segCanvas, maskCanvas };
+        }
+
+        function showSegmentationPreview(imageType, origCanvas, colorCanvas) {
+            const previewEl = document.getElementById('preview-' + imageType);
+            const overlayCanvas = document.createElement('canvas');
+            overlayCanvas.width = origCanvas.width;
+            overlayCanvas.height = origCanvas.height;
+            const ctx = overlayCanvas.getContext('2d');
+            ctx.drawImage(origCanvas, 0, 0);
+            // 用彩色分割图叠加（红=股骨，绿=胫骨，半透明）
+            ctx.drawImage(colorCanvas, 0, 0, origCanvas.width, origCanvas.height);
+
+            const segDiv = document.createElement('div');
+            segDiv.className = 'segment-preview';
+            segDiv.innerHTML = `
+                <div class="segment-preview-item">
+                    <img src="${origCanvas.toDataURL()}">
+                    <div class="segment-preview-label">${t('seg_preview_orig')}</div>
+                </div>
+                <div class="segment-preview-item">
+                    <img src="${overlayCanvas.toDataURL()}">
+                    <div class="segment-preview-label">${t('seg_preview_overlay')}</div>
+                </div>
+            `;
+            previewEl.appendChild(segDiv);
+        }
+
+        // ==================== 掩码下载（PNG / NIfTI） ====================
+        function addMaskDownloads(imageType, previewEl, originalCanvas, maskCanvas, colorCanvas, segResult) {
+            const W = segResult.canvasW, H = segResult.canvasH;
+            const labels = maskCanvas.rawLabels;
+
+            // 叠加图 PNG（原图+彩色掩码）
+            const ovC=document.createElement('canvas'); ovC.width=W; ovC.height=H;
+            const octx=ovC.getContext('2d');
+            octx.drawImage(originalCanvas,0,0,W,H);
+            octx.drawImage(colorCanvas,0,0,W,H);
+
+            const fname=(originalCanvas.originalFileName||('segmentation_'+imageType));
+            const baseName=fname.replace(/\.(nii(\.gz)?|png|jpe?g)$/i,'');
+
+            function addBtn(text, suffix, cv) {
+                const b=document.createElement('button');
+                b.className='btn btn-secondary'; b.style.marginTop='8px'; b.style.marginLeft='6px';
+                b.textContent=text;
+                b.onclick=(e)=>{ e.stopPropagation(); cv.toBlob(blob=>{
+                    const url=URL.createObjectURL(blob);
+                    const a=document.createElement('a'); a.href=url; a.download=baseName+suffix;
+                    document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                    setTimeout(()=>URL.revokeObjectURL(url),2000);
+                });};
+                previewEl.appendChild(b);
+            }
+            addBtn(t('seg_dl_png_overlay'),'_overlay.png',ovC);
+
+            if (originalCanvas.isNifti && originalCanvas.niftiHeader) {
+                try {
+                    const finalLabels=new Int16Array(W*H);
+                    for (let i=0;i<W*H && i<labels.length;i++) finalLabels[i]=labels[i];
+                    const blob=buildNiftiBlob(finalLabels,W,H,originalCanvas.niftiHeader);
+                    const b=document.createElement('button');
+                    b.className='btn btn-secondary'; b.style.marginTop='8px'; b.style.marginLeft='6px';
+                    b.textContent=t('seg_download_mask');
+                    b.onclick=(e)=>{ e.stopPropagation(); const url=URL.createObjectURL(blob);
+                        const a=document.createElement('a'); a.href=url; a.download=baseName+'_seg.nii';
+                        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+                        setTimeout(()=>URL.revokeObjectURL(url),2000); };
+                    previewEl.appendChild(b);
+                } catch(ne){ console.warn('[NIfTI下载]',ne); }
+            }
+        }
+
+        // ==================== 核心：与训练代码一致的ROI处理逻辑 ====================
+        function processImageWithMask(imageType) {
+            const config = MODEL_CONFIGS[currentModel];
+            const imageCanvas = uploadedImages[imageType];
+            const maskCanvas = uploadedImages[imageType + 'Mask'];
+            const targetSize = config.inputSize;
+
+            processedTensors[imageType] = preprocessForPrediction(imageCanvas, maskCanvas, targetSize);
+        }
+
+        /**
+         * 完全复刻训练代码的数据处理逻辑：
+         * 1. mask二值化：>0 为 1
+         * 2. roi = image * mask
+         * 3. 如果mask像素和 < 100，使用原图
+         * 4. 使用LANCZOS插值resize到目标尺寸（直接拉伸，不保持宽高比）
+         * 5. min-max归一化到[0,1]
+         */
+        function preprocessForPrediction(imageCanvas, maskCanvas, targetSize) {
+            // 训练代码顺序：1) mask二值化 2) 原图*mask 3) resize 4) min-max归一化
+            // 获取原图float32数据（原始尺寸）
+            let origImg;
+            let origW, origH;
+            if (imageCanvas.isNifti && imageCanvas.rawData) {
+                origImg = imageCanvas.rawData;
+                origW = imageCanvas.rawWidth;
+                origH = imageCanvas.rawHeight;
+            } else {
+                // 普通图片，从Canvas读取
+                origW = imageCanvas.width;
+                origH = imageCanvas.height;
+                const ctx = imageCanvas.getContext('2d');
+                const imgData = ctx.getImageData(0, 0, origW, origH);
+                origImg = new Float32Array(origW * origH);
+                for (let i = 0; i < origW * origH; i++) {
+                    origImg[i] = imgData.data[i * 4];
+                }
+            }
+
+            // 转置：Canvas格式[origH,origW] -> 训练格式[trainH,trainW]=[origW,origH]
+            const trainH = origW;  // H = dims[1]
+            const trainW = origH;  // W = dims[2]
+            const trainImg = new Float32Array(trainH * trainW);
+            for (let y = 0; y < origH; y++) {
+                for (let x = 0; x < origW; x++) {
+                    trainImg[x * origH + y] = origImg[y * origW + x];
+                }
+            }
+            origImg = trainImg;
+
+            // 获取mask并转置为训练格式
+            let maskSum = 0;
+            if (maskCanvas) {
+                let maskRaw;
+                if (maskCanvas.isNifti && maskCanvas.rawData) {
+                    maskRaw = maskCanvas.rawData;
+                } else {
+                    const mctx = maskCanvas.getContext('2d');
+                    const mData = mctx.getImageData(0, 0, maskCanvas.width, maskCanvas.height);
+                    maskRaw = new Float32Array(maskCanvas.width * maskCanvas.height);
+                    for (let i = 0; i < maskCanvas.width * maskCanvas.height; i++) {
+                        maskRaw[i] = mData.data[i * 4] > 0 ? 1.0 : 0.0;
+                    }
+                }
+                const mw0 = maskCanvas.rawWidth || maskCanvas.width;
+                const mh0 = maskCanvas.rawHeight || maskCanvas.height;
+                let maskTrain;
+                if (mw0 === origW && mh0 === origH) {
+                    maskTrain = new Float32Array(trainH * trainW);
+                    for (let y = 0; y < origH; y++) {
+                        for (let x = 0; x < origW; x++) {
+                            maskTrain[x * origH + y] = maskRaw[y * origW + x] > 0 ? 1.0 : 0.0;
+                        }
+                    }
+                } else {
+                    maskTrain = new Float32Array(trainH * trainW);
+                    for (let h = 0; h < trainH; h++) {
+                        const sx = Math.min(mw0 - 1, Math.floor(h * mw0 / trainH));
+                        for (let w = 0; w < trainW; w++) {
+                            const sy = Math.min(mh0 - 1, Math.floor(w * mh0 / trainW));
+                            maskTrain[h * trainW + w] = maskRaw[sy * mw0 + sx] > 0 ? 1.0 : 0.0;
+                        }
+                    }
+                }
+                for (let i = 0; i < trainH * trainW; i++) maskSum += maskTrain[i];
+                if (maskSum >= 100) {
+                    const roi = new Float32Array(trainH * trainW);
+                    for (let i = 0; i < trainH * trainW; i++) roi[i] = origImg[i] * maskTrain[i];
+                    origImg = roi;
+                }
+            }
+
+            // resize到targetSize（训练格式: srcW=trainW, srcH=trainH）
+            const resized = lanczosResizeFloat32(origImg, trainW, trainH, targetSize, targetSize);
+
+            // min-max归一化
+            let minVal = Infinity, maxVal = -Infinity;
+            for (let i = 0; i < targetSize * targetSize; i++) {
+                if (resized[i] < minVal) minVal = resized[i];
+                if (resized[i] > maxVal) maxVal = resized[i];
+            }
+            const range = maxVal - minVal;
+            const result = new Float32Array(targetSize * targetSize);
+            if (range >= 1e-8) {
+                for (let i = 0; i < targetSize * targetSize; i++) {
+                    result[i] = (resized[i] - minVal) / range;
+                }
+            }
+
+            return result;
+        }
+
+        // ==================== UI辅助 ====================
+        function resetAll() {
+            uploadedImages = {};
+            processedTensors = {};
+            unetSessions = {};
+            segmentationMode = null;
+            batchCases = {};
+            batchQueue = {};
+            batchWorkerRun = {};
+            hideValidation();
+        }
+
+        function showLoading(text) {
+            document.getElementById('loadingText').textContent = text || t('loading_default');
+            document.getElementById('loadingOverlay').classList.add('show');
+            document.getElementById('progressBar').style.display = 'none';
+            document.getElementById('progressFill').style.width = '0%';
+        }
+
+        function updateLoadingText(text) {
+            document.getElementById('loadingText').textContent = text;
+        }
+
+        function updateProgress(percent) {
+            document.getElementById('progressFill').style.width = percent + '%';
+        }
+
+        function hideLoading() {
+            document.getElementById('loadingOverlay').classList.remove('show');
+        }
+
+        function showValidation(type, msg) {
+            const el = document.getElementById('validationMsg');
+            el.className = 'validation-message show ' + type;
+            el.textContent = msg;
+        }
+
+        function hideValidation() {
+            document.getElementById('validationMsg').className = 'validation-message';
+        }
+    </script>
+</body>
+</html>
